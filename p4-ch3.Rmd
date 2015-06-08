@@ -1,0 +1,18 @@
+---
+title: "P4-ch3"
+author: "Igor Candeia"
+date: "08-06-2015"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+data <- read.delim("~/Download/email.txt")
+
+```
+
+```{r, echo=FALSE}
+
+```

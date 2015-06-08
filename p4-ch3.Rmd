@@ -10,6 +10,8 @@ library(dplyr)
 library(ggplot2)
 
 data <- read.delim("~/Download/email.txt")
+dois_terços <- data[sample(2/3*nrow(data)),]
+
 
 ```
 

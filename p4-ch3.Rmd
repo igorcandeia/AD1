@@ -9,9 +9,11 @@ output: html_document
 library(dplyr)
 library(ggplot2)
 
-data <- read.delim("~/Download/email.txt")
-dois_terços <- data[sample(2/3*nrow(data)),]
+data <- read.delim("~/Downloads/email.txt")
+dois_tercos <- data[sample(2/3*nrow(data)),]
+um_terco <- anti_join(data, dois_tercos)
 
+summarise(um_terco[um_terco$spam == 1, ], n())
 
 ```
 

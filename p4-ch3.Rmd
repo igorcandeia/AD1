@@ -8,15 +8,32 @@ output: html_document
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(GGally)
+theme_set(theme_bw())
+require(vcd)
 
-data <- read.delim("~/Downloads/email.txt")
+data <- read.delim("/Users/Igor/Downloads/email.txt")
 dois_tercos <- data[sample(2/3*nrow(data)),]
 um_terco <- anti_join(data, dois_tercos)
 
-summarise(um_terco[um_terco$spam == 1, ], n())
+spam <- data[data$spam == 1, ]
+spam <- spam[sample(2/3*nrow(spam)),]
+nao_spam <- data[data$spam == 0, ]
+nao_spam <- nao_spam[sample(244),]
+
+to_train <- rbind(spam, nao_spam)
+modelo <- glm(spam ~ sent_email + format + exclaim_subj, data = to_train, family = "binomial")
+summary(modelo)
+
+exp(modelo$coefficients)
+
+predictions <- predict(modelo,type = 'response') > 0.7
+true_spam <- sample(data$spam == 1 , nrow(to_train))
+
+
+table(predictions, true_spam)
+mosaic(table(predictions, true_spam))
 
 ```
 
-```{r, echo=FALSE}
-
-```
+Tiveram bem mais falsos positivos que falsos negativos, o que indica que meu modelo está falho. Não explica bem nem consegue prever bem.

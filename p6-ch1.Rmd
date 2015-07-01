@@ -8,10 +8,12 @@ output: html_document
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(gmodels)
+library(C50)
 
 training <- read.csv("~/Download/training_evasao.csv")
 teste <- read.csv("~/Download/test_first_round_kaggle.csv")
 sample_submit <- read.csv("~/Download/sample_submission_first_round.csv")
 
-
+summary(training)
 ```

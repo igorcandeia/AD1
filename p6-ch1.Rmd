@@ -10,10 +10,163 @@ library(dplyr)
 library(ggplot2)
 library(gmodels)
 library(C50)
+library(caret)
+library(kernlab)
+library(tidyr)
+library(class)
 
-training <- read.csv("~/Download/training_evasao.csv")
-teste <- read.csv("~/Download/test_first_round_kaggle.csv")
-sample_submit <- read.csv("~/Download/sample_submission_first_round.csv")
+data <- read.csv("~/../Downloads/training_evasao.csv", header = TRUE)
 
-summary(training)
+summariseData <- function(data, periodo, real) {
+  primeiro_periodo <- filter(data, data$PERIODO_RELATIVO == periodo)
+  
+  
+  if(!real) {
+    primeiro_periodo$COD_EVASAO <- factor(primeiro_periodo$COD_EVASAO)
+  }
+  primeiro_periodo$COD_CURSO <- factor(primeiro_periodo$COD_CURSO)
+  
+  if(!real) {
+    num_disciplinas_por_aluno <- group_by(primeiro_periodo, MATRICULA, COD_EVASAO) %>% summarise( CRA = sum((MEDIA)*sum(CREDITOS))/(n() * sum(CREDITOS)), NUMERO_DISCIPLINAS = n())
+  } else {
+    num_disciplinas_por_aluno <- group_by(primeiro_periodo, MATRICULA) %>% summarise(CRA = sum((MEDIA)*sum(CREDITOS))/(n() * sum(CREDITOS)), NUMERO_DISCIPLINAS = n())
+  }
+  
+  if(!real) {
+    sum_data <- group_by(primeiro_periodo, MATRICULA, COD_EVASAO, SITUACAO) %>% summarise( count = n()) %>% mutate(freq = count/sum(count))
+  }else {
+     sum_data <- group_by(primeiro_periodo, MATRICULA, SITUACAO) %>% summarise( count = n()) %>% mutate(freq = count/sum(count))
+  }
+  sum_data$count <- NULL
+  sum_data <- spread(sum_data, SITUACAO, freq)
+   sum_data["NUM_DISCIPLINAS"] <- num_disciplinas_por_aluno$NUMERO_DISCIPLINAS
+  sum_data["COD_CURSO"] <- num_disciplinas_por_aluno$COD_CURSO
+  sum_data["CRA"] <- num_disciplinas_por_aluno$CRA
+  
+  sum_data[is.na(sum_data)] <- 0
+  
+  if(!real){
+    keeps <- c("MATRICULA","COD_EVASAO","Aprovado","Reprovado","Reprovado por Falta","CRA")
+  }else{
+    keeps <- c("MATRICULA","Aprovado","Reprovado","Reprovado por Falta","CRA")
+  }
+  sum_data <- sum_data[keeps]
+  
+  #SO QUIS MANTER ESSAS VARIAVEIS ACIMA, ACREDITO QUE SEJAM MAIS SATISFATORIAS
+  
+  return (sum_data)
+}
+
+getModelStatistics <- function(crossT){
+  TP = crossT$t[4]
+  TN = crossT$t[1]
+  FP = crossT$t[3]
+  FN = crossT$t[2]
+  precision = TP / (TP + FP)
+  recall = TP / (TP+FN)
+  f_measure = 2 * ((precision * recall) / (precision + recall))
+  c(paste("precision: ",precision), paste("recall: " , recall ),paste("f-measure: " ,f_measure))
+}
+
+sum_data <- summariseData(data, 1, FALSE)
+
+train <- sum_data[1:800, ]
+test <- sum_data[801:925, ]
+
+
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+normalized_data_CRA <- as.data.frame(lapply(sum_data[6], normalize))
+normalized_data <- sum_data
+
+normalized_data[1] <- normalized_data_CRA
+normalized_data <- normalized_data[,-1]
+normalized_train <- normalized_data[1:800, ]
+normalized_train_labels <- as.vector(normalized_train[["COD_EVASAO"]])
+normalized_train <- normalized_train[,-1]
+normalized_test <- normalized_data[801:925, ]
+normalized_test_labels <- as.vector(normalized_test[["COD_EVASAO"]])
+normalized_test <- normalized_test[,-1]
+
+ctrl <- trainControl(method="repeatedcv",repeats = 3) 
+knnFit <- train(COD_EVASAO ~ ., data = normalized_data[1:800, ], method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+knnFit
+bestKnn = knnFit$bestTune[,1]
+```
+
+Resultados do KNN:
+
+```{r, message=FALSE}
+
+evasao_pred <- knn(train = normalized_train, test = normalized_test,cl = normalized_train_labels, k=bestKnn)
+
+crosstable <- CrossTable(x = normalized_test_labels, y = evasao_pred, prop.chisq=FALSE)
+getModelStatistics(crosstable)
+
+```
+
+Achei estranho a precisão ter dado 1, fora isso o resultado foi o esperado e bem satisfatório. Acredito que a precisão quer dizer que 100% das vezes que digo que o aluno não vai evadir ele não evade.
+
+```{r, message=FALSE}
+
+# USANDO SVM
+train_labels <- as.vector(train[["COD_EVASAO"]])
+test_labels <- as.vector(test[["COD_EVASAO"]])
+
+ctrl <- trainControl(method = "cv", savePred=T, classProb=T)
+mod <- train(COD_EVASAO ~ ., data = train, method = "svmLinear", trControl = ctrl)
+mod
+```
+
+Usando SVM os resultados já foram piores que o KNN como podemos ver a seguir.
+
+```{r, message=FALSE}
+train <- train[,-5]
+test <- test[,-5]
+svm_model = ksvm(train_labels~.,data=train[-2],kernel="rbfdot",C=1)
+svm_pred = predict(svm_model,test)
+crosstable <- CrossTable(x = test_labels, y = svm_pred, prop.chisq=FALSE)
+getModelStatistics(crosstable)
+```
+
+O modelo que predominou melhores estatisticas foi o KNN.
+
+```{r, message=FALSE}
+
+test <- read.csv("~/../Downloads/test_first_round_kaggle.csv", header = TRUE)
+test_data <- summariseData(test, 1, TRUE)[,-1]
+
+test_knn_data_normalized <- as.data.frame(lapply(test_data, normalize))
+labels <- as.vector(sum_data[["COD_EVASAO"]])
+
+normalized_data <- normalized_data[,-1]
+
+evasao_pred <- knn(train = normalized_data, test = test_knn_data_normalized,cl = labels, k=bestKnn)
+
+saida <- data.frame('COD_EVASAO' = evasao_pred,'MATRICULA' = as.vector(summariseData(test, 1, TRUE)[["MATRICULA"]]))
+
+data <- merge(test, saida, by.x="MATRICULA", by.y="MATRICULA")
+saida <- data.frame('ID' = data$ID,'COD_EVASAO' = data$COD_EVASAO)
+write.csv(saida, file = "result.csv",row.names=FALSE)
+
+```
+
+Modelo utilizando árvore. Seguido de suas medidas precision,recall e f-measure. O modelo por fim é muito bom, porém igualmente ao SVM quando comparado com o KNN tem baixas métricas.
+
+```{r, message=FALSE, warning=FALSE }
+train <- sum_data[1:800, ]
+test <- sum_data[801:925, ]
+bestmodel <- train(COD_EVASAO ~ ., data = train, method = "C5.0")
+bestmodel
+model <- C5.0(train[-2], train$COD_EVASAO, trials = 20, model= tree, winnow = FALSE)
+model
+summary(model)
+
+pred <- predict(model, test[-2])
+crosst <- CrossTable(test$COD_EVASAO, pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE, dnn = c('actual default', 'predicted default'))
+getModelStatistics(crosst)
+
 ```

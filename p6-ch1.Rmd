@@ -16,6 +16,7 @@ library(tidyr)
 library(class)
 
 data <- read.csv("~/../Downloads/training_evasao.csv", header = TRUE)
+  
 
 summariseData <- function(data, periodo, real) {
   primeiro_periodo <- filter(data, data$PERIODO_RELATIVO == periodo)
@@ -28,6 +29,7 @@ summariseData <- function(data, periodo, real) {
   
   if(!real) {
     num_disciplinas_por_aluno <- group_by(primeiro_periodo, MATRICULA, COD_EVASAO) %>% summarise( CRA = sum((MEDIA)*sum(CREDITOS))/(n() * sum(CREDITOS)), NUMERO_DISCIPLINAS = n())
+    
   } else {
     num_disciplinas_por_aluno <- group_by(primeiro_periodo, MATRICULA) %>% summarise(CRA = sum((MEDIA)*sum(CREDITOS))/(n() * sum(CREDITOS)), NUMERO_DISCIPLINAS = n())
   }
@@ -68,33 +70,42 @@ getModelStatistics <- function(crossT){
   c(paste("precision: ",precision), paste("recall: " , recall ),paste("f-measure: " ,f_measure))
 }
 
-sum_data <- summariseData(data, 1, FALSE)
+sum_data <- summariseData(data, 5, FALSE)
+merge_data <- merge(sum_data, data,by.x="MATRICULA", by.y="MATRICULA")
+merge_data <- filter(merge_data, merge_data$PERIODO_RELATIVO == 5)
+merge_data[is.na(merge_data)] <- 0
+merge_data$COD_EVASAO <- merge_data$COD_EVASAO.x
+keeps <- c("MATRICULA","COD_EVASAO","Aprovado","Reprovado","Reprovado por Falta","CRA", "COD_CURSO")
+merge_data <- merge_data[keeps]
+merge_data <- unique(merge_data)
 
-train <- sum_data[1:800, ]
-test <- sum_data[801:925, ]
+train <- merge_data[1:750, ]
+test <- merge_data[751:925, ]
 
 
 normalize <- function(x) {
   return ((x - min(x)) / (max(x) - min(x)))
 }
 
-normalized_data_CRA <- as.data.frame(lapply(sum_data[6], normalize))
-normalized_data <- sum_data
+normalized_data_CRA <- as.data.frame(lapply(merge_data[6], normalize))
+normalized_data <- merge_data
 
 normalized_data[1] <- normalized_data_CRA
 normalized_data <- normalized_data[,-1]
-normalized_train <- normalized_data[1:800, ]
+normalized_train <- normalized_data[1:750, ]
 normalized_train_labels <- as.vector(normalized_train[["COD_EVASAO"]])
 normalized_train <- normalized_train[,-1]
-normalized_test <- normalized_data[801:925, ]
+normalized_test <- normalized_data[751:925, ]
 normalized_test_labels <- as.vector(normalized_test[["COD_EVASAO"]])
 normalized_test <- normalized_test[,-1]
 
 ctrl <- trainControl(method="repeatedcv",repeats = 3) 
-knnFit <- train(COD_EVASAO ~ ., data = normalized_data[1:800, ], method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+knnFit <- train(COD_EVASAO ~ ., data = normalized_data[1:750, ], method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
 
 knnFit
 bestKnn = knnFit$bestTune[,1]
+
+evasao_pred <- knn(train = normalized_train, test = normalized_test,cl = normalized_train_labels, k=bestKnn)
 ```
 
 Resultados do KNN:
@@ -136,17 +147,24 @@ O modelo que predominou melhores estatisticas foi o KNN.
 
 ```{r, message=FALSE}
 
-test <- read.csv("~/../Downloads/test_first_round_kaggle.csv", header = TRUE)
-test_data <- summariseData(test, 1, TRUE)[,-1]
+data_train <- read.csv("~/../Downloads/training_evasao.csv", header = TRUE)
+test <- read.csv("~/../Downloads/test_second_round_kaggle.csv", header = TRUE)
+test_data <- summariseData(test, 5, TRUE)
+merge_teste_data <- merge(test_data, data_train,by.x="MATRICULA", by.y="MATRICULA")
+merge_teste_data[is.na(merge_teste_data)] <- 0
 
-test_knn_data_normalized <- as.data.frame(lapply(test_data, normalize))
+keeps <- c("Aprovado","Reprovado","Reprovado por Falta","CRA", "COD_CURSO")
+merge_teste_data <- merge_teste_data[keeps]
+merge_teste_data <- unique(merge_teste_data)
+
+test_knn_data_normalized <- as.data.frame(lapply(merge_teste_data, normalize))
 labels <- as.vector(sum_data[["COD_EVASAO"]])
 
 normalized_data <- normalized_data[,-1]
 
 evasao_pred <- knn(train = normalized_data, test = test_knn_data_normalized,cl = labels, k=bestKnn)
 
-saida <- data.frame('COD_EVASAO' = evasao_pred,'MATRICULA' = as.vector(summariseData(test, 1, TRUE)[["MATRICULA"]]))
+saida <- data.frame('COD_EVASAO' = evasao_pred,'MATRICULA' = as.vector(summariseData(test, 5, TRUE)[["MATRICULA"]]))
 
 data <- merge(test, saida, by.x="MATRICULA", by.y="MATRICULA")
 saida <- data.frame('ID' = data$ID,'COD_EVASAO' = data$COD_EVASAO)
@@ -157,8 +175,8 @@ write.csv(saida, file = "result.csv",row.names=FALSE)
 Modelo utilizando árvore. Seguido de suas medidas precision,recall e f-measure. O modelo por fim é muito bom, porém igualmente ao SVM quando comparado com o KNN tem baixas métricas.
 
 ```{r, message=FALSE, warning=FALSE }
-train <- sum_data[1:800, ]
-test <- sum_data[801:925, ]
+train <- sum_data[1:750, ]
+test <- sum_data[751:925, ]
 bestmodel <- train(COD_EVASAO ~ ., data = train, method = "C5.0")
 bestmodel
 model <- C5.0(train[-2], train$COD_EVASAO, trials = 20, model= tree, winnow = FALSE)

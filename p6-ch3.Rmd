@@ -1,0 +1,87 @@
+---
+title: "p6-ch3"
+author: "Igor Candeia"
+date: "Wednesday, July 15, 2015"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+library(data.table)
+library(C50)
+library(gmodels)
+library(caret)
+library(kernlab)
+library(tidyr)
+library(class)
+```
+
+```{r warning=FALSE}
+
+#Calcula métricas, precision, recall, f-measure
+calc_metrics<- function(crossT){
+  TP = crossT$t[4]
+  TN = crossT$t[1]
+  FP = crossT$t[3]
+  FN = crossT$t[2]
+
+  precision = TP / (TP + FP)
+  recall = TP / (TP+FN)
+
+  f_measure = 2 * ((precision * recall) / (precision + recall))
+
+  c(paste("precision: ",precision), paste("recall: " , recall ),paste("f-measure: " ,f_measure))
+}
+
+#Lê os dados da entrada
+data <- read.csv("~/../Downloads/training_evasao.csv")
+
+data$COD_EVASAO <- factor(data$COD_EVASAO)
+
+data <- filter(data, PERIODO_RELATIVO == 5)
+
+input_test <- read.csv("~/../Downloads/test_second_round_kaggle.csv")
+input_test$COD_EVASAO <- factor(vector(mode="numeric", lengt=nrow(input_test)))
+
+#Define os as novas variáveis agrupando-as por matrícula
+group <- data.table(data)
+group <- group[,list(QTD_CREDITOS=sum(CREDITOS, na.rm=TRUE), CRE=sum(MEDIA, na.rm=TRUE)/sum(SITUACAO!="Trancado"), APROV=sum(SITUACAO=="Aprovado"), REPROV_FALTA=sum(SITUACAO=="Reprovado por Falta"), REPROV=sum(SITUACAO=="Reprovado"), REP_DEP=sum(floor(COD_CURSO/1000000) == floor(CODIGO/100000) && SITUACAO=="Reprovado"), REP_DEP_FALTA=2 * sum(floor(COD_CURSO/1000000) == floor(CODIGO/100000) && SITUACAO=="Reprovado por Falta"), TRANCAMENTOS=sum(SITUACAO=="Trancado")), by=MATRICULA]
+
+group_input_test <- data.table(input_test)
+group_input_test <- group_input_test[,list(QTD_CREDITOS=sum(CREDITOS, na.rm=TRUE), CRE=sum(MEDIA, na.rm=TRUE)/sum(SITUACAO!="Trancado"), APROV=sum(SITUACAO=="Aprovado"), REPROV_FALTA=sum(SITUACAO=="Reprovado por Falta"), REPROV=sum(SITUACAO=="Reprovado"), REP_DEP=sum(floor(COD_CURSO/1000000) == floor(CODIGO/100000) && SITUACAO=="Reprovado"), REP_DEP_FALTA=2 * sum(floor(COD_CURSO/1000000) == floor(CODIGO/100000) && SITUACAO=="Reprovado por Falta"), TRANCAMENTOS=sum(SITUACAO=="Trancado")), by=MATRICULA]
+
+data <- merge(data, group, by.x="MATRICULA", by.y="MATRICULA")
+input_test <- merge(input_test, group_input_test, by.x="MATRICULA", by.y="MATRICULA")
+keeps <- c("ID","MATRICULA","COD_CURSO", "PERIODO", "CODIGO", "MEDIA", "SITUACAO", "QTD_CREDITOS", "CRE", "APROV", "REPROV_FALTA", "REPROV", "REP_DEP", "REP_DEP_FALTA","COD_EVASAO")
+data <- data[keeps]
+data[is.na(data)] <- 0
+input_test <- input_test[keeps]
+input_test[is.na(input_test)] <- 0
+data$SITUACAO= as.integer(as.factor(data$SITUACAO))
+input_test$SITUACAO= as.integer(as.factor(input_test$SITUACAO))
+
+set.seed(23)
+data_rand <- data[order(runif(5408)), ]
+
+train_size = floor(nrow(data) * 0.75)
+test_size = ceiling(nrow(data) * 0.25)
+
+train <- data_rand[1:train_size, ]
+test <- data_rand[(train_size+1):nrow(data), ]
+
+ctrl <- trainControl(method="repeatedcv",repeats = 3) 
+knnFit <- train(COD_EVASAO ~ ., data = train, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+bestKnn = knnFit$bestTune[,1]
+evasao_pred <- knn(train, test,cl = train$COD_EVASAO, k= bestKnn)
+crosstable <- CrossTable(x = test$COD_EVASAO, y = evasao_pred, prop.chisq=FALSE)
+calc_metrics(crosstable)
+
+#Saida para Kaggle
+evasao_pred <- knn(train, input_test,cl = train$COD_EVASAO, k= bestKnn)
+saida = data.frame('ID' = input_test$ID , 'COD_EVASAO' = evasao_pred)
+write.csv(saida, file = "result.csv",row.names=FALSE)
+
+```
+
+Bom para esse modelo acredito que o Knn também seja a melhor opção (por falta de tempo vou considerar essa crença verdadeira), podemos ver acima que as métricas foram boas.
